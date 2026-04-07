@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "example-stdio-server": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "env": {},
+      "enabled": false,
+      "timeout": 30
+    },
+    "example-sse-server": {
+      "transport": "sse",
+      "url": "http://localhost:3001/sse",
+      "headers": {},
+      "enabled": false,
+      "timeout": 30
+    }
+  }
+}
