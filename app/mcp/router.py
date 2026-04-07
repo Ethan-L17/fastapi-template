@@ -52,6 +52,8 @@ async def list_tools(server_name: str, mgr: MCPManager):
         tools = await mgr.list_server_tools(server_name)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Server '{server_name}' not connected")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"MCP server error: {exc}")
     return {"server": server_name, "tools": tools}
 
 
@@ -65,7 +67,7 @@ async def call_tool(body: ToolCallRequest, mgr: MCPManager):
             status_code=404, detail=f"Server '{body.server_name}' not connected"
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=502, detail=f"MCP server error: {exc}")
 
     content_list = []
     for block in result.content:
@@ -88,6 +90,8 @@ async def list_resources(server_name: str, mgr: MCPManager):
         resources = await mgr.list_server_resources(server_name)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Server '{server_name}' not connected")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"MCP server error: {exc}")
     return {"server": server_name, "resources": resources}
 
 
@@ -101,7 +105,7 @@ async def read_resource(body: ResourceReadRequest, mgr: MCPManager):
             status_code=404, detail=f"Server '{body.server_name}' not connected"
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=502, detail=f"MCP server error: {exc}")
 
     content_list = []
     for block in result.contents:
@@ -118,8 +122,13 @@ async def read_resource(body: ResourceReadRequest, mgr: MCPManager):
 @router.post("/servers/reload")
 async def reload_servers(mgr: MCPManager):
     """Reload MCP server configs and reconcile connections."""
-    await mgr.reload_all()
-    return {"status": "ok", "servers": list(mgr.connections.keys())}
+    errors = await mgr.reload_all()
+    failed = {name: err for name, err in errors.items() if err is not None}
+    return {
+        "status": "partial" if failed else "ok",
+        "servers": list(mgr.connections.keys()),
+        "errors": failed or None,
+    }
 
 
 @router.post("/servers/{server_name}/reconnect")
@@ -131,4 +140,6 @@ async def reconnect_server(server_name: str, mgr: MCPManager):
         raise HTTPException(
             status_code=404, detail=f"Server '{server_name}' not found in config"
         )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Reconnect failed: {exc}")
     return {"status": "ok", "server": server_name}

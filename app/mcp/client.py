@@ -71,23 +71,28 @@ class MCPClientManager:
                 logger.warning("MCP server '%s' already connected, skipping", name)
                 return
 
-            stack = AsyncExitStack()
-            try:
-                if config.transport == TransportType.STDIO:
-                    session = await self._connect_stdio(stack, config)
-                else:
-                    session = await self._connect_sse(stack, config)
+        stack = AsyncExitStack()
+        try:
+            connect_coro = (
+                self._connect_stdio(stack, config)
+                if config.transport == TransportType.STDIO
+                else self._connect_sse(stack, config)
+            )
+            session = await asyncio.wait_for(connect_coro, timeout=config.timeout)
+        except asyncio.TimeoutError:
+            await stack.aclose()
+            raise ConnectionError(
+                f"Timeout ({config.timeout}s) connecting to MCP server '{name}'"
+            )
+        except Exception:
+            await stack.aclose()
+            raise
 
-                self._connections[name] = MCPConnection(
-                    name=name,
-                    config=config,
-                    session=session,
-                    _stack=stack,
-                )
-                logger.info("Connected to MCP server '%s' via %s", name, config.transport.value)
-            except Exception:
-                await stack.aclose()
-                raise
+        async with self._lock:
+            self._connections[name] = MCPConnection(
+                name=name, config=config, session=session, _stack=stack,
+            )
+        logger.info("Connected to MCP server '%s' via %s", name, config.transport.value)
 
     async def _connect_stdio(
         self, stack: AsyncExitStack, config: MCPServerConfig
@@ -145,16 +150,35 @@ class MCPClientManager:
             raise KeyError(f"Server '{name}' not found in config")
         await self._connect(name, configs[name])
 
-    async def reload_all(self) -> None:
-        """Re-read config and reconcile connections (add new, remove stale)."""
+    async def reload_all(self) -> dict[str, str | None]:
+        """Re-read config and reconcile connections (add new, remove stale).
+
+        Returns a dict of {server_name: error_message_or_None} for each
+        server that was attempted.
+        """
         configs = await self._provider.load_servers()
         async with self._lock:
             current = set(self._connections)
             desired = set(configs)
             for stale in current - desired:
                 await self._disconnect(stale)
-        for new_name in desired - set(self._connections):
-            await self._connect(new_name, configs[new_name])
+
+        errors: dict[str, str | None] = {}
+        results = await asyncio.gather(
+            *(
+                self._connect(name, configs[name])
+                for name in desired - set(self._connections)
+            ),
+            return_exceptions=True,
+        )
+        new_names = list(desired - set(self._connections))
+        for name, result in zip(new_names, results):
+            if isinstance(result, Exception):
+                logger.error("Failed to connect MCP server '%s' during reload: %s", name, result)
+                errors[name] = str(result)
+            else:
+                errors[name] = None
+        return errors
 
     # ------------------------------------------------------------------
     # Queries
