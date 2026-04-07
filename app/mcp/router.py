@@ -4,18 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.mcp.dependencies import MCPManager
+
 router = APIRouter(prefix="/mcp", tags=["mcp"])
-
-
-def _mgr(request: Request):
-    """Retrieve the MCPClientManager stored on app state."""
-    mgr = getattr(request.app.state, "mcp_manager", None)
-    if mgr is None:
-        raise HTTPException(status_code=503, detail="MCP client manager not initialized")
-    return mgr
 
 
 # ---------------------------------------------------------------------------
@@ -40,9 +34,8 @@ class ResourceReadRequest(BaseModel):
 
 
 @router.get("/servers")
-async def list_servers(request: Request):
+async def list_servers(mgr: MCPManager):
     """List all connected MCP servers and their transport type."""
-    mgr = _mgr(request)
     return {
         name: {
             "transport": conn.config.transport.value,
@@ -53,9 +46,8 @@ async def list_servers(request: Request):
 
 
 @router.get("/servers/{server_name}/tools")
-async def list_tools(server_name: str, request: Request):
+async def list_tools(server_name: str, mgr: MCPManager):
     """List tools exposed by a specific MCP server."""
-    mgr = _mgr(request)
     try:
         tools = await mgr.list_server_tools(server_name)
     except KeyError:
@@ -64,9 +56,8 @@ async def list_tools(server_name: str, request: Request):
 
 
 @router.post("/tools/call")
-async def call_tool(body: ToolCallRequest, request: Request):
+async def call_tool(body: ToolCallRequest, mgr: MCPManager):
     """Call a tool on a connected MCP server."""
-    mgr = _mgr(request)
     try:
         result = await mgr.call_tool(body.server_name, body.tool_name, body.arguments)
     except KeyError:
@@ -91,9 +82,8 @@ async def call_tool(body: ToolCallRequest, request: Request):
 
 
 @router.get("/servers/{server_name}/resources")
-async def list_resources(server_name: str, request: Request):
+async def list_resources(server_name: str, mgr: MCPManager):
     """List resources exposed by a specific MCP server."""
-    mgr = _mgr(request)
     try:
         resources = await mgr.list_server_resources(server_name)
     except KeyError:
@@ -102,9 +92,8 @@ async def list_resources(server_name: str, request: Request):
 
 
 @router.post("/resources/read")
-async def read_resource(body: ResourceReadRequest, request: Request):
+async def read_resource(body: ResourceReadRequest, mgr: MCPManager):
     """Read a resource from a connected MCP server."""
-    mgr = _mgr(request)
     try:
         result = await mgr.read_resource(body.server_name, body.uri)
     except KeyError:
@@ -127,17 +116,15 @@ async def read_resource(body: ResourceReadRequest, request: Request):
 
 
 @router.post("/servers/reload")
-async def reload_servers(request: Request):
+async def reload_servers(mgr: MCPManager):
     """Reload MCP server configs and reconcile connections."""
-    mgr = _mgr(request)
     await mgr.reload_all()
     return {"status": "ok", "servers": list(mgr.connections.keys())}
 
 
 @router.post("/servers/{server_name}/reconnect")
-async def reconnect_server(server_name: str, request: Request):
+async def reconnect_server(server_name: str, mgr: MCPManager):
     """Reconnect a specific MCP server."""
-    mgr = _mgr(request)
     try:
         await mgr.reconnect(server_name)
     except KeyError:
