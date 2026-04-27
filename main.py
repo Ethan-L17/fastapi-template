@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.agent.checkpointer import CheckpointerManager
+from app.agent.langgraph.checkpointer import CheckpointerManager
 from app.config import settings
 from app.mcp.client import MCPClientManager
 from app.mcp.config import FileConfigProvider

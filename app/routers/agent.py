@@ -10,8 +10,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from app.agent.dependencies import Checkpointer
-from app.agent.react import WORKFLOW_NAME, build_config, build_react_agent
+from app.agent.langgraph.dependencies import Checkpointer
+from app.agent.langgraph.react import WORKFLOW_NAME, build_config, build_react_agent
 from app.schemas.agent import ChatMessage, ChatRequest, ChatResponse, HistoryItem
 
 router = APIRouter(prefix="/agent", tags=["agent"])

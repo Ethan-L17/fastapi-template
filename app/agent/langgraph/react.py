@@ -1,13 +1,13 @@
 """一个使用 PostgreSQL checkpointer 做长期记忆的 ReAct agent 示例。
 
 该模块只负责 **构建 graph**，真正的 checkpointer / 连接池由
-``app.agent.checkpointer.CheckpointerManager`` 在应用启动时创建并注入，
+``app.agent.langgraph.checkpointer.CheckpointerManager`` 在应用启动时创建并注入，
 这样不同工作流可以共享同一个连接池。
 
 使用示例::
 
-    from app.agent.react import build_react_agent
-    from app.agent.checkpointer import CheckpointerManager
+    from app.agent.langgraph.react import build_react_agent
+    from app.agent.langgraph.checkpointer import CheckpointerManager
 
     manager: CheckpointerManager = app.state.checkpointer  # 由 lifespan 注入
     graph = build_react_agent(manager)
@@ -23,7 +23,7 @@ from typing import Annotated, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 
-from app.agent.checkpointer import CheckpointerManager
+from app.agent.langgraph.checkpointer import CheckpointerManager
 
 # 工作流名称，会作为 checkpoint_ns 写入数据库
 WORKFLOW_NAME = "react_agent"

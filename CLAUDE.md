@@ -55,11 +55,15 @@ This app acts as an **MCP Client**, connecting to external MCP servers.
 - **`router.py`** — REST API at `/api/mcp/...` for listing servers, tools, resources, and calling tools/reading resources. Also provides `/servers/reload` (hot-reload from config) and `/servers/{name}/reconnect`.
 - **`dependencies.py`** — `MCPManager` type annotation for FastAPI dependency injection, pulling `mcp_manager` from `app.state`.
 
-### LangGraph Agent System (`app/agent/`)
+### Agent System (`app/agent/`)
 
-- **`checkpointer.py`** — `CheckpointerManager` wraps `psycopg`'s `AsyncConnectionPool` and `AsyncPostgresSaver`. Each workflow is isolated via `checkpoint_ns`. Call `build_config(workflow, thread_id)` to get the LangGraph config dict.
-- **`react.py`** — Builds a ReAct agent `StateGraph` (agent → conditional → tools → agent). The graph nodes are **mock placeholders** — replace `_call_model` with a real LLM call and `_call_tools` with actual tool execution. `WORKFLOW_NAME = "react_agent"` is the checkpoint namespace.
-- **`dependencies.py`** — `Checkpointer` type annotation for FastAPI dependency injection.
+Agent 实现按框架依赖分成两个子目录：
+
+- **`langgraph/`** — 依赖 LangGraph / LangChain 框架的 agent
+  - `checkpointer.py` — `CheckpointerManager` wraps `psycopg`'s `AsyncConnectionPool` and `AsyncPostgresSaver`. Each workflow is isolated via `checkpoint_ns`. Call `build_config(workflow, thread_id)` to get the LangGraph config dict.
+  - `react.py` — Builds a ReAct agent `StateGraph` (agent → conditional → tools → agent). The graph nodes are **mock placeholders** — replace `_call_model` with a real LLM call and `_call_tools` with actual tool execution. `WORKFLOW_NAME = "react_agent"` is the checkpoint namespace.
+  - `dependencies.py` — `Checkpointer` type annotation for FastAPI dependency injection.
+- **`standalone/`** — 不依赖特定框架的 agent（placeholder，待实现）
 
 ### Routers (`app/routers/`)
 

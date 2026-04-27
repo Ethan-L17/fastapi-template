@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
 
-from app.agent.checkpointer import CheckpointerManager
+from app.agent.langgraph.checkpointer import CheckpointerManager
 
 
 async def get_checkpointer(request: Request) -> CheckpointerManager:
