@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,6 +16,9 @@ from app.routers import items
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -28,20 +33,32 @@ async def lifespan(app: FastAPI):
     logger.info("MCP client manager started (%d server(s))", len(manager.connections))
 
     # --- Startup: open shared LangGraph PostgreSQL checkpointer pool ---
-    checkpointer = CheckpointerManager(
-        dsn=settings.checkpointer_dsn,
-        min_size=settings.checkpointer_pool_min_size,
-        max_size=settings.checkpointer_pool_max_size,
-        timeout=settings.checkpointer_pool_timeout,
-        auto_setup=settings.checkpointer_auto_setup,
-    )
-    app.state.checkpointer = checkpointer
-    await checkpointer.setup()
+    if settings.checkpointer_enabled:
+        checkpointer = CheckpointerManager(
+            dsn=settings.checkpointer_dsn,
+            min_size=settings.checkpointer_pool_min_size,
+            max_size=settings.checkpointer_pool_max_size,
+            timeout=settings.checkpointer_pool_timeout,
+            auto_setup=settings.checkpointer_auto_setup,
+        )
+        try:
+            await checkpointer.setup()
+            app.state.checkpointer = checkpointer
+        except Exception:
+            logger.warning(
+                "Checkpointer setup failed (PostgreSQL unavailable?), "
+                "agent routes will return 503"
+            )
+            app.state.checkpointer = None
+    else:
+        app.state.checkpointer = None
 
     yield
 
     # --- Shutdown: close checkpointer pool then MCP connections ---
-    await checkpointer.close()
+    if app.state.checkpointer is not None:
+        checkpointer = app.state.checkpointer
+        await checkpointer.close()
     await manager.stop()
     logger.info("MCP client manager stopped")
 
