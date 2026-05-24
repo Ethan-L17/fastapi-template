@@ -17,6 +17,11 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest",
+    "pytest-asyncio",
     "httpx",
     "ruff",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

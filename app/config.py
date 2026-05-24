@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     checkpointer_pool_timeout: float = 5.0
     checkpointer_auto_setup: bool = True
 
+    # --- LLM Provider (OpenAI 兼容) ---
+    llm_api_key: str = ""
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_model: str = "gpt-4o-mini"
+    llm_temperature: float = 0.7
+
     class Config:
         env_file = ".env"
 
