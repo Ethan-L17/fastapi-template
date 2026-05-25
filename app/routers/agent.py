@@ -97,6 +97,8 @@ async def get_state(thread_id: str, checkpointer: Checkpointer) -> ChatResponse:
 @router.delete("/threads/{thread_id}", status_code=204)
 async def delete_thread(thread_id: str, checkpointer: Checkpointer) -> None:
     """删除某个 thread 在本工作流下的所有 checkpoint。"""
+    if checkpointer is None:
+        raise HTTPException(status_code=503, detail="Checkpointer not available (PostgreSQL not connected)")
     await checkpointer.checkpointer.adelete_thread(thread_id)
 
 
@@ -111,7 +113,7 @@ def _build_supervisor_graph(checkpointer: CheckpointerManager | None = None):
         base_url=settings.llm_base_url,
         model=settings.llm_model,
         temperature=settings.llm_temperature,
-        checkpointer=checkpointer,
+        checkpointer=checkpointer,  # type: ignore[arg-type]
     )
 
 
@@ -132,45 +134,34 @@ async def supervisor_chat(req: ChatRequest, checkpointer: Checkpointer) -> ChatR
 
 @router.post("/supervisor/chat/stream")
 async def supervisor_chat_stream(req: ChatRequest, checkpointer: Checkpointer) -> StreamingResponse:
-    """与 Supervisor agent 对话（SSE 流式输出）。
-
-    返回 Server-Sent Events 流，每个事件格式：
-    ```
-    data: {"node": "supervisor", "type": "routing", "content": "researcher"}
-    data: {"node": "researcher", "type": "message", "content": "..."}
-    data: {"node": "supervisor", "type": "final", "content": "..."}
-    ```
-    """
+    """与 Supervisor agent 对话（SSE 真流式输出，token 级别）。"""
 
     async def event_generator():
         graph = _build_supervisor_graph(checkpointer)
         config = build_supervisor_config(checkpointer, thread_id=req.thread_id)
 
         try:
-            async for event in graph.astream(
+            async for msg, metadata in graph.astream(
                 {"messages": [("user", req.message)]},
                 config=config,
-                stream_mode="updates",
+                stream_mode="messages",
             ):
-                for node_name, node_output in event.items():
-                    if node_name == "supervisor":
-                        next_worker = node_output.get("next_worker", "FINISH")
-                        yield f"data: {json.dumps({'node': 'supervisor', 'type': 'routing', 'content': next_worker}, ensure_ascii=False)}\n\n"
+                node_name = metadata.get("langgraph_node", "")
 
-                        # 如果 supervisor 决定 FINISH，提取最终回复
-                        if next_worker == "FINISH":
-                            messages = node_output.get("messages", [])
-                            for msg in messages:
-                                content = getattr(msg, "content", None) or (msg[1] if isinstance(msg, tuple) else "")
-                                if content and not content.startswith("[routing"):
-                                    yield f"data: {json.dumps({'node': 'supervisor', 'type': 'final', 'content': content}, ensure_ascii=False)}\n\n"
+                # 只处理 LLM 产出的 AIMessageChunk / AIMessage
+                content = getattr(msg, "content", "")
+                if not content:
+                    continue
 
-                    elif node_name in ("researcher", "mathematician"):
-                        messages = node_output.get("messages", [])
-                        for msg in messages:
-                            content = getattr(msg, "content", None) or (msg[1] if isinstance(msg, tuple) else "")
-                            if content:
-                                yield f"data: {json.dumps({'node': node_name, 'type': 'message', 'content': content}, ensure_ascii=False)}\n\n"
+                # supervisor 的路由决策消息（[routing to: xxx]）提取为 routing 事件
+                if node_name == "supervisor" and content.startswith("[routing"):
+                    # 从内容中提取 next_worker
+                    next_worker = content.replace("[routing to: ", "").rstrip("]")
+                    yield f"data: {json.dumps({'node': 'supervisor', 'type': 'routing', 'content': next_worker}, ensure_ascii=False)}\n\n"
+                    continue
+
+                # 其他内容（LLM token 或完整消息）都作为 token 事件输出
+                yield f"data: {json.dumps({'node': node_name, 'type': 'token', 'content': content}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             logger.exception("Supervisor stream error")

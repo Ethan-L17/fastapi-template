@@ -10,4 +10,8 @@ build/
 *.sqlite3
 .ruff_cache/
 .pytest_cache/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
 .mypy_cache/

@@ -57,8 +57,8 @@ def _should_continue(state: AgentState) -> str:
     return END
 
 
-def build_react_agent(manager: CheckpointerManager):
-    """构建并编译 ReAct graph，绑定共享的 PostgreSQL checkpointer。"""
+def build_react_agent(manager: CheckpointerManager | None = None):
+    """构建并编译 ReAct graph。有 PostgreSQL checkpointer 时绑定持久化，否则用内存。"""
     builder = StateGraph(AgentState)
     builder.add_node("agent", _call_model)
     builder.add_node("tools", _call_tools)
@@ -71,9 +71,14 @@ def build_react_agent(manager: CheckpointerManager):
     )
     builder.add_edge("tools", "agent")
 
-    return builder.compile(checkpointer=manager.checkpointer)
+    kwargs = {}
+    if manager is not None:
+        kwargs["checkpointer"] = manager.checkpointer
+    return builder.compile(**kwargs)
 
 
-def build_config(manager: CheckpointerManager, thread_id: str) -> dict:
+def build_config(manager: CheckpointerManager | None, thread_id: str) -> dict:
     """该工作流专用的 config 构造器，固定使用 ``WORKFLOW_NAME`` 作为命名空间。"""
+    if manager is None:
+        return {"configurable": {"thread_id": thread_id}}
     return manager.build_config(workflow=WORKFLOW_NAME, thread_id=thread_id)

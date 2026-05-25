@@ -56,6 +56,8 @@ SUPERVISOR_SYSTEM_PROMPT = """你是一个任务调度 supervisor。根据用户
 
 只输出 JSON，不要输出其他内容。"""
 
+FINISH_SYSTEM_PROMPT = "你是一个助手。请根据对话历史，直接回答用户的问题。不要提及 routing 或 worker 的细节，直接给出最终回复。"
+
 WORKER_SYSTEM_PROMPTS = {
     "researcher": "你是一个信息检索专家。根据用户的问题，给出准确、详细的回答。请直接给出答案，不需要调用工具。",
     "mathematician": "你是一个数学计算专家。根据用户的问题，进行精确的计算和分析。请直接给出计算过程和结果。",
@@ -118,14 +120,24 @@ async def supervisor_node(
     *,
     llm: ChatOpenAI,
 ) -> dict[str, Any]:
-    """Supervisor 节点：分析消息，决定路由到哪个 worker。"""
+    """Supervisor 节点：分析消息，决定路由到哪个 worker。FINISH 时生成最终回复。"""
     messages = [SystemMessage(content=SUPERVISOR_SYSTEM_PROMPT)] + list(state["messages"])
     response: AIMessage = await llm.ainvoke(messages)
 
     next_worker = _parse_supervisor_response(response.content)
     logger.info("Supervisor decided: next_worker=%s", next_worker)
 
-    # 把 supervisor 的决策也加到消息中，方便 worker 理解上下文
+    if next_worker == "FINISH":
+        # 让 LLM 流式生成最终回复，逐块拼接
+        finish_messages = [SystemMessage(content=FINISH_SYSTEM_PROMPT)] + list(state["messages"])
+        content = ""
+        async for chunk in llm.astream(finish_messages):
+            content += chunk.content or ""
+        return {
+            "next_worker": "FINISH",
+            "messages": [AIMessage(content=content)],
+        }
+
     return {
         "next_worker": next_worker,
         "messages": [AIMessage(content=f"[routing to: {next_worker}]")],
@@ -139,8 +151,10 @@ async def researcher_node(
 ) -> dict[str, Any]:
     """Researcher worker 节点。"""
     messages = [SystemMessage(content=WORKER_SYSTEM_PROMPTS["researcher"])] + list(state["messages"])
-    response: AIMessage = await llm.ainvoke(messages)
-    return {"messages": [response]}
+    content = ""
+    async for chunk in llm.astream(messages):
+        content += chunk.content or ""
+    return {"messages": [AIMessage(content=content)]}
 
 
 async def mathematician_node(
@@ -150,8 +164,10 @@ async def mathematician_node(
 ) -> dict[str, Any]:
     """Mathematician worker 节点。"""
     messages = [SystemMessage(content=WORKER_SYSTEM_PROMPTS["mathematician"])] + list(state["messages"])
-    response: AIMessage = await llm.ainvoke(messages)
-    return {"messages": [response]}
+    content = ""
+    async for chunk in llm.astream(messages):
+        content += chunk.content or ""
+    return {"messages": [AIMessage(content=content)]}
 
 
 def route_next(state: SupervisorState) -> Literal["researcher", "mathematician", "__end__"]:
@@ -201,9 +217,18 @@ def build_supervisor(
     builder = StateGraph(SupervisorState)
 
     # 添加节点
-    builder.add_node("supervisor", lambda state: supervisor_node(state, llm=llm))
-    builder.add_node("researcher", lambda state: researcher_node(state, llm=llm))
-    builder.add_node("mathematician", lambda state: mathematician_node(state, llm=llm))
+    async def _supervisor(state: SupervisorState) -> dict[str, Any]:
+        return await supervisor_node(state, llm=llm)
+
+    async def _researcher(state: SupervisorState) -> dict[str, Any]:
+        return await researcher_node(state, llm=llm)
+
+    async def _mathematician(state: SupervisorState) -> dict[str, Any]:
+        return await mathematician_node(state, llm=llm)
+
+    builder.add_node("supervisor", _supervisor)
+    builder.add_node("researcher", _researcher)
+    builder.add_node("mathematician", _mathematician)
 
     # 路由：START -> supervisor -> (worker | END) -> supervisor
     builder.add_edge(START, "supervisor")
@@ -226,6 +251,8 @@ def build_supervisor(
     return builder.compile(**kwargs)
 
 
-def build_config(manager: CheckpointerManager, thread_id: str) -> dict:
+def build_config(manager: CheckpointerManager | None, thread_id: str) -> dict:
     """该工作流专用的 config 构造器。"""
+    if manager is None:
+        return {"configurable": {"thread_id": thread_id}}
     return manager.build_config(workflow=WORKFLOW_NAME, thread_id=thread_id)
